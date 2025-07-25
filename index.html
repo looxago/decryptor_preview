@@ -1,0 +1,328 @@
+<!-- crypto_preview_debug_v2.html -->
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8" />
+  <title>CryptoX SecureMail Debug Preview</title>
+  <style>
+    body {font-family:'Segoe UI',Tahoma,sans-serif;background:#eef1f5;margin:0;padding:20px;color:#222;}
+    .container {max-width:800px;margin:auto;background:#fff;padding:30px;border-radius:10px;box-shadow:0 5px 15px rgba(0,0,0,0.1);}
+    h2{color:#0077cc;}
+    textarea,input[type="file"],select,button{font-size:1em;margin-top:10px;width:100%;}
+    textarea{height:120px;padding:10px;border-radius:5px;border:1px solid #ccc;resize:vertical;background:#f4f4f4;cursor:not-allowed;}
+    .button-primary{background:#0077cc;color:#fff;padding:12px;border:none;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:15px;transition:background .3s;}
+    .button-primary:hover{background:#005fa3;}
+    .result{background:#f9f9f9;padding:20px;border-left:5px solid #0077cc;border-radius:6px;margin-top:25px;white-space:pre-wrap;}
+    .hidden{display:none;}
+    .error{color:#b00020;background:#ffe8e8;padding:12px;margin-top:10px;border-left:5px solid #b00020;border-radius:6px;}
+    video{width:100%;border-radius:6px;margin-top:10px;}
+    .attachment-list {margin-top:20px;}
+    .attachment-item {padding:10px; border-bottom: 1px solid #ddd; display:flex; justify-content: space-between; align-items:center;}
+    .attachment-name {font-weight:bold; flex-grow:1;}
+    .attachment-buttons button {margin-left:8px;}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/fflate/umd/index.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/fflate/umd/index.js"></script>
+ <script>
+	// === 🔐 Anti-Debug / DevTools Blocking ===
+	(function () {
+	  // 🔒 Block F12, Ctrl+Shift+I/J/C, Ctrl+U
+	  window.addEventListener('keydown', function (e) {
+		const forbiddenKeys = (
+		  e.key === 'F12' ||
+		  (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes(e.key.toUpperCase())) ||
+		  (e.ctrlKey && e.key.toLowerCase() === 'u')
+		);
+		if (forbiddenKeys) {
+		  e.preventDefault();
+		  alert('⛔ Απαγορεύεται η πρόσβαση στα εργαλεία ανάπτυξης.');
+		}
+	  });
+
+	  // 🔒 Block Right Click
+	  window.addEventListener('contextmenu', function (e) {
+		e.preventDefault();
+		alert('⛔ Δεν επιτρέπεται το δεξί κλικ.');
+	  });
+
+	  // 🔒 Detect console inspection
+	  setInterval(function () {
+		const el = new Image();
+		Object.defineProperty(el, 'id', {
+		  get: function () {
+			alert("⛔ Debugger εντοπίστηκε!");
+			document.body.innerHTML = "<h1 style='text-align:center;color:red;margin-top:20%'>⛔ Η εφαρμογή τερματίστηκε λόγω debugging.</h1>";
+			throw new Error("Debugger Detected");
+		  }
+		});
+		console.log(el);
+	  }, 1000);
+
+	  // 🔒 Detect resize anomaly (DevTools open)
+	  setInterval(() => {
+		if (window.outerHeight - window.innerHeight > 120 || window.outerWidth - window.innerWidth > 160) {
+		  document.body.innerHTML = "<h1 style='text-align:center;color:red;margin-top:20%'>⛔ Η προβολή μπλοκαρίστηκε (DevTools εντοπίστηκε).</h1>";
+		}
+	  }, 1000);
+	})();
+ </script>
+
+</head>
+<body>
+  <div class="container">
+    <h2>🔐 CryptoX Debug Preview</h2>
+    <label><b>1. Κρυπτογραφημένο μήνυμα:</b></label>
+    <textarea id="blobInput" readonly></textarea>
+
+    <p><b>2. QR Μέθοδος:</b></p>
+    <select id="qrMethod" onchange="toggleQRInputs()" class="button-primary">
+      <option value="">-- Επιλογή --</option>
+      <option value="file">📁 QR από εικόνα</option>
+      <option value="camera">📷 QR από κάμερα</option>
+    </select>
+
+    <div id="qrFileContainer" class="hidden">
+      <input type="file" id="qrFile" accept="image/png, image/jpeg" />
+    </div>
+
+    <div id="qrCameraContainer" class="hidden">
+      <button class="button-primary" onclick="startCamera()">🎥 Έναρξη κάμερας</button>
+      <video id="qr-video" class="hidden" autoplay playsinline></video>
+    </div>
+
+    <label><b>3. Συνημμένο (.xlzip):</b></label>
+    <input type="file" id="attachmentFile" accept=".xlzip,.zip" />
+
+    <button class="button-primary" id="decryptBtn">🔓 Προβολή</button>
+    <div id="errorBox" class="error hidden"></div>
+
+    <div class="result hidden" id="output">
+      <h3>✉️ Περιεχόμενο Email:</h3>
+      <div id="emailContent"></div>
+      <hr />
+      <div id="attachmentList" class="attachment-list"></div>
+    </div>
+  </div>
+
+<script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+<script>
+const blobInput = document.getElementById("blobInput");
+const decryptBtn = document.getElementById("decryptBtn");
+const outputDiv = document.getElementById("output");
+const emailContentDiv = document.getElementById("emailContent");
+const errorBox = document.getElementById("errorBox");
+const attachmentListDiv = document.getElementById("attachmentList");
+const attachmentFileInput = document.getElementById("attachmentFile");
+
+document.addEventListener("DOMContentLoaded", () => {
+  const blob = getJoinedBlobParts();
+  if (blob) blobInput.value = decodeURIComponent(blob);
+  decryptBtn.addEventListener("click", decryptAll);
+});
+
+function toggleQRInputs() {
+  ["qrFileContainer", "qrCameraContainer"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  const m = document.getElementById("qrMethod").value;
+  if (m === "file") document.getElementById("qrFileContainer").classList.remove("hidden");
+  else if (m === "camera") document.getElementById("qrCameraContainer").classList.remove("hidden");
+}
+
+async function decryptAll() {
+  errorBox.classList.add("hidden");
+  outputDiv.classList.add("hidden");
+  emailContentDiv.innerHTML = "";
+  attachmentListDiv.innerHTML = "";
+
+  try {
+    await decryptEmail();
+    if (attachmentFileInput.files.length > 0)
+      await decryptAttachmentFile(attachmentFileInput.files[0]);
+  } catch (e) {
+    showError("❌ Σφάλμα: " + (e.message || e));
+    console.error(e);
+  }
+}
+
+async function decryptEmail() {
+  const blob = blobInput.value.trim();
+  if (!blob) throw showError("❌ Δεν βρέθηκε blob.");
+  const qrData = await getQRData();
+  console.log("📦 Email QR:", qrData);
+  const [keyHex] = qrData.split(":");
+  const key = await crypto.subtle.importKey("raw", hexToBytes(keyHex), "AES-GCM", false, ["decrypt"]);
+
+  const enc = base64ToBytes(blob);
+  const nonce = enc.slice(0, 12), ct = enc.slice(12);
+  console.log("🔑 Decrypting email blob...");
+  const dec = await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, key, ct);
+  const decompressed = fflate.decompressSync(new Uint8Array(dec));
+  const data = JSON.parse(new TextDecoder().decode(decompressed));
+  console.log("✅ Email αποκρυπτογραφήθηκε:", data);
+
+  if (!data.recipients?.includes(getParam("user")))
+    throw showError("🚫 Δεν είστε εξουσιοδοτημένος.");
+
+  emailContentDiv.innerHTML = `<p><b>Θέμα:</b> ${escapeHTML(data.subject)}</p><hr><p><b>Σώμα:</b><br>${data.body.replace(/\n/g, "<br>")}</p>`;
+  outputDiv.classList.remove("hidden");
+}
+
+async function decryptAttachmentFile(file) {
+  console.log("📎 Αποκρυπτογράφηση συνημμένου:", file.name);
+  const qrData = await getQRData();
+  console.log("📦 Attachment QR:", qrData);
+  const [keyHex] = qrData.split(":");
+  const key = await crypto.subtle.importKey("raw", hexToBytes(keyHex), "AES-GCM", false, ["decrypt"]);
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const zipped = new Uint8Array(reader.result);
+        const unzipped = fflate.unzipSync(zipped);
+        const finalFiles = {};
+
+        for (const name in unzipped) {
+          const raw = new Uint8Array(unzipped[name]);
+          console.log("📄 Εντοπίστηκε αρχείο:", name, "-", raw.byteLength, "bytes");
+
+          try {
+            const nonce = raw.slice(0, 12);
+            const ct = raw.slice(12);
+            const dec = await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, key, ct);
+            finalFiles[name] = { data: new Uint8Array(dec), decrypted: true };
+            console.log("✅ Αρχείο αποκρυπτογραφήθηκε:", name);
+          } catch (e) {
+            console.warn(`⚠️ Δεν αποκρυπτογραφήθηκε: ${name}`, e);
+            finalFiles[name] = { data: raw, decrypted: false };
+          }
+        }
+
+        renderDecompressedFiles(finalFiles);
+        resolve();
+      } catch (e) {
+        showError("❌ Πρόβλημα αποσυμπίεσης ή αποκρυπτογράφησης: " + e.message);
+        reject(e);
+      }
+    };
+    reader.onerror = (e) => {
+      showError("❌ Σφάλμα ανάγνωσης αρχείου: " + e.target.error);
+      reject(e.target.error);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function renderDecompressedFiles(files) {
+  attachmentListDiv.innerHTML = "<h4>📎 Περιεχόμενα Συνημμένου:</h4>";
+  for (const originalName in files) {
+    const { data: fileData, decrypted } = files[originalName];
+    let displayName = originalName;
+    if (decrypted && displayName.endsWith(".encrypted_attachment")) {
+      displayName = displayName.replace(/\.encrypted_attachment$/, "");
+    }
+
+    const itemDiv = document.createElement("div");
+    itemDiv.className = "attachment-item";
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "attachment-name";
+    nameSpan.textContent = displayName + (decrypted ? " 🔐" : " 🟡");
+
+    const buttonsDiv = document.createElement("div");
+    buttonsDiv.className = "attachment-buttons";
+
+    const viewBtn = document.createElement("button");
+    viewBtn.textContent = "Προβολή";
+    viewBtn.className = "button-primary";
+	viewBtn.onclick = () => {
+	  const blob = new Blob([fileData]);
+	  const url = URL.createObjectURL(blob);
+	  const ext = displayName.split('.').pop().toLowerCase();
+	  const previewable = ['pdf', 'png', 'jpg', 'jpeg', 'txt'];
+
+	  if (previewable.includes(ext)) {
+		window.open(url, "_blank");
+	  } else {
+		alert("Δεν υποστηρίζεται προβολή του αρχείου '" + displayName + "'. Μπορείτε να το αποθηκεύσετε.");
+	  }
+	};
+
+
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "Αποθήκευση";
+    saveBtn.className = "button-primary";
+    saveBtn.onclick = () => {
+      const blob = new Blob([fileData]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = displayName;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    buttonsDiv.appendChild(viewBtn);
+    buttonsDiv.appendChild(saveBtn);
+    itemDiv.appendChild(nameSpan);
+    itemDiv.appendChild(buttonsDiv);
+    attachmentListDiv.appendChild(itemDiv);
+  }
+}
+
+// === Βοηθητικές ===
+
+function getParam(n) {
+  return new URLSearchParams(window.location.search).get(n);
+}
+function getJoinedBlobParts(max = 50) {
+  let blob = "";
+  for (let i = 1; i <= max; i++) {
+    const part = getParam("data" + i);
+    if (part) blob += part;
+    else break;
+  }
+  return blob || getParam("data") || "";
+}
+function escapeHTML(s) {
+  return s.replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" }[ch]));
+}
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.remove("hidden");
+}
+function base64ToBytes(b64) {
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+function hexToBytes(hex) {
+  return new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+}
+async function getQRData() {
+  const method = document.getElementById("qrMethod").value;
+  const qrFile = document.getElementById("qrFile").files[0];
+  if (method === "camera" && window._qrDataFromCamera) return window._qrDataFromCamera;
+  if (method === "file" && qrFile) return await readQRFromFile(qrFile);
+  throw showError("⚠️ Επιλέξτε QR κλειδί.");
+}
+async function readQRFromFile(f) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const d = ctx.getImageData(0, 0, c.width, c.height);
+        const code = jsQR(d.data, c.width, c.height);
+        code ? res(code.data) : rej("QR not found");
+      };
+      img.src = reader.result;
+    };
+    reader.onerror = rej;
+    reader.readAsDataURL(f);
+  });
+}
+</script>
+</body>
+</html>
